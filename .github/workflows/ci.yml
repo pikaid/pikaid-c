@@ -1,0 +1,444 @@
+name: CI
+
+on:
+  # Every branch push is gated. Restricting this to main would let a broken
+  # topic branch be pushed without any required check running on its SHA.
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CTEST_OUTPUT_ON_FAILURE: 1
+
+jobs:
+  build-and-test:
+    name: Build and test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu GCC
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+          - name: Ubuntu Clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+          - name: macOS Clang
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+          - name: Windows MSVC
+            os: windows-latest
+            cc: ""
+            cxx: ""
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install schema validator
+        run: python -m pip install --disable-pip-version-check jsonschema
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DPIKAID_WARNINGS_AS_ERRORS=ON
+          -DPIKAID_REQUIRE_SCHEMA_VALIDATION=ON
+
+      - name: Build
+        run: cmake --build build --config Debug --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Debug --output-on-failure
+
+      - name: Run quickstart example
+        shell: bash
+        run: |
+          exe=build/pikaid_quickstart
+          if [ -f build/Debug/pikaid_quickstart.exe ]; then
+            exe=build/Debug/pikaid_quickstart.exe
+          fi
+          "$exe"
+
+  sanitizers:
+    name: AddressSanitizer + UndefinedBehaviorSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install schema validator
+        run: python -m pip install --disable-pip-version-check jsonschema
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S . -B build-sanitize
+          -DCMAKE_BUILD_TYPE=Debug
+          -DPIKAID_WARNINGS_AS_ERRORS=ON
+          -DPIKAID_ENABLE_SANITIZERS=ON
+          -DPIKAID_REQUIRE_SCHEMA_VALIDATION=ON
+
+      - name: Build
+        run: cmake --build build-sanitize --parallel
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:check_initialization_order=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build-sanitize --output-on-failure
+
+  coverage:
+    name: Coverage (90% line gate)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install coverage and schema tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes lcov
+          python -m pip install --disable-pip-version-check jsonschema
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-coverage
+          -DCMAKE_BUILD_TYPE=Debug
+          -DPIKAID_WARNINGS_AS_ERRORS=ON
+          -DPIKAID_ENABLE_COVERAGE=ON
+          -DPIKAID_REQUIRE_SCHEMA_VALIDATION=ON
+
+      - name: Build
+        run: cmake --build build-coverage --parallel
+
+      - name: Test
+        run: ctest --test-dir build-coverage --output-on-failure
+
+      - name: Capture and gate line coverage
+        run: |
+          lcov --capture --directory build-coverage \
+            --output-file coverage.info --ignore-errors mismatch
+          lcov --remove coverage.info \
+            '/usr/*' '*/tests/*' '*/examples/*' \
+            --output-file coverage.info --ignore-errors unused
+          lcov --list coverage.info
+          lcov --summary coverage.info --fail-under-lines 90
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-info
+          path: coverage.info
+          if-no-files-found: error
+
+  shared-library:
+    name: Shared library exports
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install schema validator
+        run: python -m pip install --disable-pip-version-check jsonschema
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-shared
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_SHARED_LIBS=ON
+          -DPIKAID_WARNINGS_AS_ERRORS=ON
+          -DPIKAID_REQUIRE_SCHEMA_VALIDATION=ON
+
+      - name: Build
+        run: cmake --build build-shared --parallel
+
+      - name: Test
+        run: ctest --test-dir build-shared --output-on-failure
+
+      - name: Verify only public symbols are exported
+        shell: bash
+        run: |
+          nm -D --defined-only build-shared/libpikaid.so \
+            | awk '{print $3}' | grep '^pikaid_' | sort > exported.txt
+          cat exported.txt
+          test "$(wc -l < exported.txt)" -eq 18
+          # Check every internal symbol explicitly. A trailing `! grep` is
+          # exempt from `set -e`, so a leaked first symbol was masked whenever
+          # the last negated check found nothing and returned success.
+          status=0
+          for symbol in pikaid_now pikaid_entropy_fill; do
+            if grep -qx "$symbol" exported.txt; then
+              echo "internal symbol exported: $symbol" >&2
+              status=1
+            fi
+          done
+          exit "$status"
+
+  repository-hygiene:
+    name: Repository and archive hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: .ai stays local-only
+        shell: bash
+        run: |
+          test -z "$(git ls-files -- .ai)"
+          git check-ignore -v .ai/reports/probe.md
+
+      - name: Legitimate dotfiles remain tracked
+        shell: bash
+        run: |
+          for path in .gitignore .gitattributes .github/workflows/ci.yml; do
+            git ls-files --error-unmatch "$path" > /dev/null
+          done
+
+      - name: Source archive excludes .ai
+        shell: bash
+        run: |
+          git archive --format=tar HEAD > source.tar
+          if tar -tf source.tar | grep -Eq '^\.ai(/|$)'; then
+            echo "source archive contains .ai entries" >&2
+            tar -tf source.tar | grep -E '^\.ai(/|$)' >&2
+            exit 1
+          fi
+
+  install-consumer:
+    name: Install, CMake and pkg-config consumers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pkg-config
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      # The documented install command selects the prefix at install time, so
+      # the generated metadata must not depend on the configure-time prefix.
+      - name: Install into a staging prefix
+        run: cmake --install build --prefix "${{ runner.temp }}/pikaid"
+
+      - name: Verify installed metadata is relocatable
+        shell: bash
+        run: |
+          prefix="${{ runner.temp }}/pikaid"
+          test -f "$prefix/include/pikaid.h"
+          test -f "$prefix/lib/pkgconfig/pikaid.pc"
+          grep -Fq "prefix=\${pcfiledir}/../.." "$prefix/lib/pkgconfig/pikaid.pc"
+          if find "$prefix" -path '*/.ai*' -print -quit | grep -q .; then
+            echo "install tree contains .ai" >&2
+            exit 1
+          fi
+
+      - name: Build a CMake consumer
+        shell: bash
+        run: |
+          mkdir -p consumer
+          cat > consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.16)
+          project(pikaid_consumer C)
+          find_package(pikaid 1.0 CONFIG REQUIRED)
+          add_executable(consumer main.c)
+          target_link_libraries(consumer PRIVATE pikaid::pikaid)
+          EOF
+          cat > consumer/main.c <<'EOF'
+          #include <pikaid.h>
+
+          #include <string.h>
+
+          int main(void)
+          {
+              char id[PIKAID_STRING_SIZE];
+              pikaid_t decoded;
+
+              if (pikaid_generate_at(UINT64_C(1700000000), id) != PIKAID_OK) {
+                  return 1;
+              }
+              if (!pikaid_is_valid(id, strlen(id))) {
+                  return 2;
+              }
+              if (pikaid_parse(id, PIKAID_STRING_LENGTH, &decoded) != PIKAID_OK) {
+                  return 3;
+              }
+              return 0;
+          }
+          EOF
+          cmake -S consumer -B consumer/build \
+            -DCMAKE_PREFIX_PATH="${{ runner.temp }}/pikaid"
+          cmake --build consumer/build --parallel
+          ./consumer/build/consumer
+
+      - name: Build a pkg-config consumer
+        shell: bash
+        run: |
+          prefix="${{ runner.temp }}/pikaid"
+          export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+          test "$(pkg-config --modversion pikaid)" = "1.0.0"
+          mkdir -p pkg-consumer
+          cat > pkg-consumer/main.c <<'EOF'
+          #include <pikaid.h>
+
+          #include <string.h>
+
+          int main(void)
+          {
+              char id[PIKAID_STRING_SIZE];
+              pikaid_t decoded;
+              uint64_t timestamp = 0;
+
+              if (pikaid_generate_at(UINT64_C(1700000000), id) != PIKAID_OK) {
+                  return 1;
+              }
+              if (strlen(id) != PIKAID_STRING_LENGTH) {
+                  return 2;
+              }
+              if (!pikaid_is_valid(id, PIKAID_STRING_LENGTH)) {
+                  return 3;
+              }
+              if (pikaid_parse(id, PIKAID_STRING_LENGTH, &decoded) != PIKAID_OK) {
+                  return 4;
+              }
+              if (pikaid_get_timestamp(&decoded, &timestamp) != PIKAID_OK) {
+                  return 5;
+              }
+              return timestamp == UINT64_C(1700000000) ? 0 : 6;
+          }
+          EOF
+          # pkg-config backslash-escapes spaces in the prefix. Evaluate the
+          # emitted flags so an installation path containing spaces links.
+          pkg_flags="$(pkg-config --cflags --libs pikaid)"
+          eval "cc -std=c99 -Wall -Wextra -Wpedantic -Werror \
+            pkg-consumer/main.c $pkg_flags \
+            -o pkg-consumer/pkg-consumer"
+          ./pkg-consumer/pkg-consumer
+
+  official-conformance:
+    name: Official shared conformance suite (pinned)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pinned suite tooling
+        run: python -m pip install --disable-pip-version-check jsonschema==4.26.0
+
+      # Provenance is the exact Git commit plus the suite's SHA256SUMS; a
+      # checksum file alone is not a signature. Any mismatch fails this job.
+      - name: Fetch the official suite at the pinned commit
+        shell: bash
+        run: |
+          suite="${{ runner.temp }}/pikaid-specs"
+          git clone --quiet https://github.com/pikaid/pikaid-specs.git "$suite"
+          git -C "$suite" checkout --quiet --detach 059780cc0e5b113443812720d95c630649bf3aa3
+          test "$(git -C "$suite" rev-parse HEAD)" = "059780cc0e5b113443812720d95c630649bf3aa3"
+          (cd "$suite/conformance" && sha256sum --check --strict SHA256SUMS)
+
+      - name: Configure and build the adapter
+        run: |
+          cmake -S . -B build-conformance \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPIKAID_WARNINGS_AS_ERRORS=ON
+          cmake --build build-conformance --parallel \
+            --target pikaid_conformance_adapter pikaid_conformance_adapter_mutant
+
+      - name: Run the official suite and mutation control
+        run: |
+          python tests/conformance/run_official_suite.py \
+            --suite-dir "${{ runner.temp }}/pikaid-specs" \
+            --adapter build-conformance/tests/pikaid_conformance_adapter \
+            --mutant-adapter build-conformance/tests/pikaid_conformance_adapter_mutant \
+            --work-dir conformance-work \
+            --report-json conformance-work/official-report.json
+
+      - name: Upload conformance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-conformance-evidence
+          path: conformance-work
+          if-no-files-found: warn
+
+  static-analysis:
+    name: Static analysis (clang-tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-tidy
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-analyze
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DPIKAID_BUILD_TESTS=OFF
+          -DPIKAID_BUILD_EXAMPLES=OFF
+
+      - name: Run clang-tidy
+        # Name the checks explicitly so behavior does not depend on the
+        # distribution's default set, and fail on any warning instead of
+        # letting clang-tidy exit 0 while printing diagnostics.
+        run: >
+          clang-tidy
+          --checks='clang-diagnostic-*,clang-analyzer-*'
+          --warnings-as-errors='*'
+          -p build-analyze
+          src/pikaid.c src/pikaid_clock.c src/pikaid_entropy.c

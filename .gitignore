@@ -1,0 +1,23 @@
+# Build trees
+build/
+build-*/
+cmake-build-*/
+
+# Coverage and sanitizer artefacts
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+
+# Editor and operating system noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local-only agent workspace: scratch data, generated artefacts and reports.
+# This directory is never tracked and never shipped in source or install
+# archives. Keep local files on disk; this rule must not be widened to other
+# dotfiles.
+/.ai/

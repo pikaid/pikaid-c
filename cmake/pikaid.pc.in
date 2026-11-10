@@ -1,0 +1,11 @@
+prefix=@PIKAID_PC_PREFIX@
+exec_prefix=${prefix}
+libdir=@PIKAID_PC_LIBDIR@
+includedir=@PIKAID_PC_INCLUDEDIR@
+
+Name: pikaid
+Description: Official C implementation of the pikaid identifier format
+URL: https://github.com/pikaid/pikaid-c
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lpikaid
+Cflags: -I${includedir}@PIKAID_PC_DEFINES@

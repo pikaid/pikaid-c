@@ -1,0 +1,15 @@
+# Keep text files checked out with LF on every platform.
+#
+# The conformance generator records the raw SHA-256 of the official vector
+# JSON, and the generated C header is compared byte for byte. Windows runners
+# check out with core.autocrlf=true, so without this policy the fixture hashes
+# differently and the generated-header check fails even though the content is
+# unchanged. See tests/vectors/generate_vectors.py.
+* text=auto eol=lf
+
+# Inputs and generated artefacts whose bytes are part of the provenance
+# contract. These must be byte-identical on Windows, Linux and macOS.
+tests/vectors/pikaid-v1.json         text eol=lf
+tests/vectors/pikaid-v1.schema.json  text eol=lf
+tests/vectors/pikaid_vectors.h       text eol=lf
+tests/vectors/*.py                   text eol=lf
