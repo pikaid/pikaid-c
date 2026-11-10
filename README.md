@@ -1,53 +1,46 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/pikaid/pikaid-specs/v1.0.4/logo.png" alt="pikaid" width="300" />
+  <a href="https://github.com/pikaid/pikaid-specs">
+    <img src="https://raw.githubusercontent.com/pikaid/pikaid-specs/v1.0.4/logo.png" alt="pikaid" width="300">
+  </a>
 </p>
 
 <p align="center">
   <strong>Small · Sortable · Secure ID generator</strong>
 </p>
 
-# pikaid — Official C Implementation
+<div align="center">
 
-A C99 implementation of [pikaid specification revision 1.0.4](https://github.com/pikaid/pikaid-specs/tree/v1.0.4):
-a compact, chronologically sortable identifier for databases, APIs and
-distributed systems.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![C](https://img.shields.io/badge/language-C-A8B9CC.svg)](https://github.com/pikaid/pikaid-c)
+[![CI](https://github.com/pikaid/pikaid-c/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pikaid/pikaid-c/actions/workflows/ci.yml)
+[![Official implementation](https://img.shields.io/badge/official-implementation-2e7d32.svg)](https://github.com/pikaid/pikaid-specs)
+[![Specification 1.0.4](https://img.shields.io/badge/spec-1.0.4-4b56a6.svg)](https://github.com/pikaid/pikaid-specs/tree/v1.0.4)
 
-**Status:** the specification surface is implemented and tested; no release or
-tag has been published. The library version is `1.0.0` and the package is
-prepared for a `v1.0.0` tag once publication prerequisites are verified (see
-[Versioning and compatibility](#versioning-and-compatibility)).
+</div>
 
-## The format
+**pikaid** is the **official C implementation** of a compact, chronologically sortable, collision-resistant identifier format for databases, APIs, and distributed systems.
 
-A pikaid is exactly **26 lowercase Base36 characters**:
+This is the immutable, unversioned [pikaid format](https://github.com/pikaid/pikaid-specs/tree/v1.0.4), documented in specification revision **1.0.4**.
 
-```text
-[ 7 characters: unsigned Unix seconds ][ 19 characters: 96 random bits ]
-```
+## ✨ Why pikaid?
 
-Its binary form is exactly **17 bytes**:
+- **Short:** Compact, readable IDs for URLs, logs, and API resources.
+- **Sortable:** Lexicographically ordered by timestamp, with **one-second precision**.
+- **Collision-resistant:** 96 bits of cryptographic randomness make collisions extremely unlikely, never impossible.
+- **Storage-friendly:** Use `BINARY(17)` or readable `CHAR(26)`.
+- **Distributed-friendly:** No central sequence generator or coordination required.
 
-```text
-[ 5 bytes: unsigned Unix seconds, big-endian ][ 12 bytes: randomness ]
-```
+## 🧬 Identifier format
 
-The format is immutable and unversioned. This library never changes the wire
-format and performs no normalization, truncation or locale-dependent
-conversion.
+A pikaid contains **26 lowercase Base36 characters**: a **7-character Unix-seconds timestamp** followed by **19 characters encoding 96 bits of cryptographic randomness**. Its binary form is **17 bytes**: 5 unsigned big-endian timestamp bytes followed by 12 randomness bytes.
 
-Official known-answer vectors exercised by the test suite:
+![Identifier structure](https://raw.githubusercontent.com/pikaid/pikaid-specs/v1.0.4/structure.svg)
 
-| Timestamp | Randomness | String form | Binary form |
-| ---: | --- | --- | --- |
-| `0` | all zero | `00000000000000000000000000` | `0000000000000000000000000000000000` |
-| `1700000000` | `00112233445566778899aabb` | `0s44we8002loz3po6mcf6vsn23` | `006553f10000112233445566778899aabb` |
-| `78364164095` | all `ff` | `zzzzzzz7oiylpimjg5u2ca1ypr` | `123ede3fffffffffffffffffffffffffff` |
+> **Ordering:** Different seconds sort chronologically. Within the same second, randomness—not issuance order—decides the order.
 
-`78364164095` (`36^7 - 1`) is the largest valid timestamp. The 96-bit
-randomness field is bounded by `2^96 - 1`; larger suffixes are well formed but
-not valid pikaids.
+> **Security:** These are identifiers, **not secrets**, session credentials, authentication tokens, or API keys.
 
-## Requirements
+## ⚙️ Requirements
 
 - A C99 compiler (the public header includes `<stdbool.h>`, `<stddef.h>` and
   `<stdint.h>`).
@@ -59,7 +52,14 @@ not valid pikaids.
 There are no third-party runtime dependencies and the library never allocates
 memory.
 
-## Build and test
+## 📦 Installation
+
+From a checkout of the public source repository:
+
+```sh
+git clone https://github.com/pikaid/pikaid-c.git
+cd pikaid-c
+```
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -87,7 +87,15 @@ This installs the header, the library, a CMake package (`pikaidConfig.cmake`,
 | `PIKAID_ENABLE_SANITIZERS` | `OFF` | Build with AddressSanitizer and UndefinedBehaviorSanitizer |
 | `PIKAID_ENABLE_COVERAGE` | `OFF` | Build with statement coverage instrumentation |
 
-## Use it
+## 🚀 Basic Usage
+
+Once built, run the ready-to-use sample:
+
+```sh
+./build/pikaid_quickstart
+```
+
+The same public API can be used in your own program:
 
 ```c
 #include <pikaid.h>
@@ -139,22 +147,18 @@ ordering and rejection end to end:
 ./build/pikaid_quickstart
 ```
 
-### Versioning and compatibility
+## 💡 Example Use Case
 
-- The **identifier format** is immutable and unversioned. A future library
-  release will never change the 26-character or 17-byte representation.
-- The **library** follows semantic versioning. `1.0.0` is the first release;
-  the CMake package requires the same major version (`find_package(pikaid 1.0
-  CONFIG REQUIRED)`), and the shared library uses `SOVERSION 1`
-  (`libpikaid.so.1`).
-- The **public C API** is the set of declarations in `include/pikaid.h`.
-  Internal entropy and clock helpers are not exported and are not part of the
-  ABI.
-- A `v1.0.0` Git tag and GitHub release are not part of this tree; they are
-  created only after the publication prerequisites in
-  [`RELEASING.md`](RELEASING.md) have been verified.
+Use pikaid to identify **users, orders, invoices, uploads, events, and API resources**. Independent services can generate compact IDs without a shared counter, while timestamp-based ordering helps with indexing, sorting, and logs.
 
-## API
+## 📚 Canonical specification
+
+- [Canonical specification](https://github.com/pikaid/pikaid-specs)
+- [Revision 1.0.4](https://github.com/pikaid/pikaid-specs/tree/v1.0.4)
+
+Specification revisions describe the format; they do not change the encoded identifiers.
+
+## 🧩 API Reference
 
 Every fallible function returns a `pikaid_status`. `PIKAID_OK` is `0` and every
 failure is a distinct positive value. `pikaid_status_string` returns a stable
@@ -242,7 +246,27 @@ human-readable label for any status.
 - There is no sub-second precision and no ordering guarantee beyond whole
   seconds plus the randomness tie-break.
 
-## Platform support
+## 🔄 Order Guarantee
+
+Text and 17-byte binary values preserve the canonical timestamp-then-randomness ordering. Same-second values are **not** ordered by issuance.
+
+## 🛢 Storage Recommendations
+
+| Representation | Size | Recommended for |
+| --- | ---: | --- |
+| **BINARY(17)** | 17 bytes | Compact primary keys and indexes |
+| **CHAR(26)** | 26 characters | Readable SQL, debugging, URLs, and logs |
+
+Use an **ASCII bytewise/binary collation** for text columns (for example, `ascii_bin` on MariaDB/MySQL). Case-insensitive or locale-aware sorting is not a substitute for canonical bytewise comparison.
+
+## ✅ Verification and release status
+
+The [CI workflow](https://github.com/pikaid/pikaid-c/actions/workflows/ci.yml) runs native tests, pinned automated conformance checks, and language-specific quality gates. To run the native checks locally from a checkout: `ctest --test-dir build --output-on-failure`.
+
+**Automated passing tests are not a security certification.** The independent CSPRNG source and failure-path audits (`P-GENERATE-RNG-SOURCE` and `P-GENERATE-RNG-FAILURE`) still require separate human evidence.
+
+<details>
+<summary>Platform, tooling, and conformance details</summary>
 
 | Platform | Entropy backend | Verification |
 | --- | --- | --- |
@@ -255,8 +279,6 @@ human-readable label for any status.
 
 The authoring machine for this tree was macOS arm64 with Apple Clang. Linux and
 Windows entries above refer to the configured CI matrix, not to local runs.
-
-## Testing
 
 The suite includes official vectors, independently derived known-answer tests,
 malformed and overflow cases, boundary timestamps, randomized round trips,
@@ -286,7 +308,35 @@ repository/source-archive hygiene check that `.ai/` never ships, the pinned
 official conformance suite with a mutation control, and a gating
 `clang-tidy` pass on the library sources.
 
-## Specification and license
+</details>
 
-- Specification: [pikaid specification revision 1.0.4](https://github.com/pikaid/pikaid-specs/tree/v1.0.4)
-- License: [MIT](LICENSE)
+Registry publication is not implied by a green CI: use the installation method documented above.
+
+## 🤝 Contributing
+
+Contributions are always welcome! 💙
+
+Whether you're fixing a typo, improving documentation, adding tests, or making pikaid even better, every contribution is appreciated.
+
+**Want to help? Here's how:**
+
+- 🐛 **Found a bug?** [Open an issue](https://github.com/pikaid/pikaid-c/issues) with clear reproduction steps.
+- 💡 **Have an idea?** Start with an issue before making major changes.
+- 🛠️ **Ready to contribute?** Open a pull request explaining your changes.
+- 🧪 **Keep it tested.** Add meaningful regression tests for behavior changes and follow the existing conventions.
+- ✅ **Make sure CI passes.** All required checks must be green before a pull request is merged. No shortcuts!
+
+**One important rule:** pikaid's identifier format is immutable. Contributions must preserve the [canonical specification (revision 1.0.4)](https://github.com/pikaid/pikaid-specs/tree/v1.0.4).
+
+🔐 **Found a security vulnerability?** Report it privately using GitHub's security reporting (when available), or [contact the maintainer](mailto:larananas.dev@proton.me)—not through a public issue.
+
+**Every improvement matters, big or small. Thanks for helping make pikaid better!** 🐇
+
+## 📄 License
+
+The implementation is available under the [MIT License](LICENSE).
+
+## ✉️ Contact
+
+For licensing or project-related questions: [larananas.dev@proton.me](mailto:larananas.dev@proton.me).
+
