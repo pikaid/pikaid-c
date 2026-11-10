@@ -174,3 +174,28 @@ endif()
 configure_file(cmake/pikaid.pc.in ${CMAKE_CURRENT_BINARY_DIR}/pikaid.pc @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pikaid.pc
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+
+# Build distributable source archives only for the standalone project.
+# Exclude Git metadata, generated build outputs and local-only agent files.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(CPACK_PACKAGE_NAME "pikaid")
+    set(CPACK_PACKAGE_VENDOR "pikaid")
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Official C implementation of pikaid")
+    set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/pikaid/pikaid-c")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+    set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+    set(CPACK_GENERATOR "TGZ;ZIP")
+    set(CPACK_SOURCE_GENERATOR "TGZ;ZIP")
+    set(CPACK_SOURCE_PACKAGE_FILE_NAME "pikaid-${PROJECT_VERSION}")
+    set(CPACK_SOURCE_IGNORE_FILES
+        "/[.]git/"
+        "/[.]ai/"
+        "/build[^/]*/"
+        "/dist/"
+        "/node_modules/"
+        "/[.]cache/"
+        "/coverage/"
+        "/[.]DS_Store$")
+    include(CPack)
+endif()
